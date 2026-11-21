@@ -3,6 +3,7 @@ import { clear, confirmBox, download, formatSize, h, icon, modal, objectUrl, toa
 import { artCanvas, sanitizeImage } from './media.ts';
 import type { StudioCtx } from './studio.ts';
 import { folderOptions } from './studio.ts';
+import { openVoice } from './voice.ts';
 
 const MAX_FILE = 50 * 1024 * 1024;
 
@@ -36,6 +37,26 @@ export function openEditor(ctx: StudioCtx, original: Note, onChange: () => void,
   tags.addEventListener('input', () => { note.tags = [...new Set(tags.value.split(',').map((t) => t.trim().replace(/^#/, '').toLowerCase()).filter(Boolean))]; touch(); });
   const folderSel = h('select', { 'aria-label': 'Collection' }, folderOptions(vault).map((o) => h('option', { value: o.folder?.id ?? '', selected: (o.folder?.id ?? null) === note.folder }, o.label)));
   folderSel.addEventListener('change', () => { note.folder = folderSel.value || null; touch(); });
+
+  let caret: number | null = null;
+  const remember = () => { caret = body.selectionStart; };
+  body.addEventListener('blur', remember);
+  body.addEventListener('keyup', remember);
+  body.addEventListener('click', remember);
+  const insertText = (t: string) => {
+    const at = caret ?? body.value.length;
+    const before = body.value.slice(0, at), after = body.value.slice(at);
+    const pre = before && !/\s$/.test(before) ? (before.endsWith('\n') ? '' : ' ') : '';
+    const post = after && !/^\s/.test(after) ? ' ' : '';
+    body.value = before + pre + t + post + after;
+    caret = (before + pre + t).length;
+    body.dispatchEvent(new Event('input'));
+    toast('Inserted');
+  };
+  const micBtn = h('button', {
+    class: 'mic', 'aria-label': 'Voice typing', title: 'Voice typing (on-device)',
+    onclick: () => { const st = vault.settings; openVoice({ rules: st.dictionary, commands: st.voiceCommands, guard, onInsert: insertText }); },
+  }, icon('mic'), h('span', {}, 'Dictate'));
 
   const attachWrap = h('div', { class: 'attachments' });
   const linkWrap = h('div', { class: 'links' });
@@ -160,6 +181,7 @@ export function openEditor(ctx: StudioCtx, original: Note, onChange: () => void,
       h('div', { class: 'banner' }, artCanvas(note.id, 720, 200)),
       title,
       h('div', { class: 'meta-row' }, h('label', {}, icon('folder'), folderSel), tags),
+      h('div', { class: 'body-tools' }, micBtn),
       body,
       h('h4', {}, 'Images & files'), attachWrap,
       h('h4', {}, 'Connections'), linkWrap,

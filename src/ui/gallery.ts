@@ -83,15 +83,18 @@ function openViewer(root: HTMLElement, ctx: GalleryCtx, start: number) {
     lastTap = now;
     taps.push(cell);
     if (taps.length > 12) taps.shift();
-    if (await gestureMatches(ctx.store, idx, taps)) { taps = []; showKeyPanel(view, ctx); }
+    const snap = taps.slice(), art = idx;
+    if (await gestureMatches(ctx.store, art, snap)) { taps = []; showKeyPanel(view, ctx); }
   });
   root.append(view);
   draw();
 }
 
 function showKeyPanel(view: HTMLElement, ctx: GalleryCtx) {
-  if (view.querySelector('.keypanel')) return;
+  if (view.querySelector('.keypanel') || view.dataset.opening) return;
+  view.dataset.opening = '1';
   void hasVault(ctx.store).then((exists) => {
+    delete view.dataset.opening;
     const panel = exists ? unlockPanel(ctx, () => panel.remove()) : setupPanel(ctx, () => panel.remove());
     view.append(panel);
     (panel.querySelector('input') as HTMLInputElement | null)?.focus();

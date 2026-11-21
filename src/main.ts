@@ -6,6 +6,7 @@ import { showGallery } from './ui/gallery.ts';
 import { LockGuard } from './ui/lock.ts';
 import { clearArtCache } from './ui/media.ts';
 import { showStudio } from './ui/studio.ts';
+import { abortVoice } from './ui/voice.ts';
 
 const root = document.getElementById('app')!;
 const store = new IdbStore();
@@ -13,6 +14,7 @@ let vault: Vault | null = null;
 
 function lock() {
   guard.stop();
+  abortVoice(); // stop mic, kill transcription, zero audio
   vault?.lock();
   vault = null;
   for (const el of document.querySelectorAll('.modal-wrap, .sheet, .viewer, .toast')) el.remove();

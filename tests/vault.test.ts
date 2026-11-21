@@ -112,3 +112,16 @@ describe('vault', () => {
     expect((await store.getHeader())!.gesture!.length).toBe(32);
   }, T);
 });
+
+describe('dictation settings', () => {
+  it('dictionary and voice commands are stored encrypted in the vault index', async () => {
+    const store = new MemoryStore();
+    const v = await createVault(store, 'pw');
+    expect(v.settings.voiceCommands).toBe(true);
+    await v.updateSettings({ dictionary: [{ from: 'at a lea', to: 'ZEBRA-REPLACEMENT' }], voiceCommands: false });
+    for (const [, d] of await store.all()) expect(unutf8.decode(d).includes('ZEBRA')).toBe(false);
+    const r = (await unlockVault(store, 'pw'))!;
+    expect(r.settings.dictionary).toEqual([{ from: 'at a lea', to: 'ZEBRA-REPLACEMENT' }]);
+    expect(r.settings.voiceCommands).toBe(false);
+  }, 60_000);
+});

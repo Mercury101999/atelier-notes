@@ -3,6 +3,7 @@ import { confirmBox, download, h, icon, promptText, toast } from './dom.ts';
 import { EXHIBIT } from './gallery.ts';
 import { hideInArtworksAsync, readBackupFiles } from './stegoClient.ts';
 import type { StudioCtx } from './studio.ts';
+import { MODEL_LABEL, modelCached, prepareModel, removeModel, voiceSupported } from './voice.ts';
 
 export function openSettings(ctx: StudioCtx, rerender: () => void) {
   const { vault, store, guard } = ctx;
@@ -108,6 +109,35 @@ export function openSettings(ctx: StudioCtx, rerender: () => void) {
     await store.wipe(); ctx.lock();
   });
 
+  // Voice typing
+  const cmds = h('input', { type: 'checkbox', checked: s.voiceCommands });
+  cmds.addEventListener('change', async () => { await vault.updateSettings({ voiceCommands: cmds.checked }); toast('Saved'); });
+  const modelState = h('p', { class: 'muted small' }, 'Checking…');
+  const refreshModel = async () => { modelState.textContent = (await modelCached()) ? `Voice model ready offline: ${MODEL_LABEL}.` : `Voice model not downloaded yet (${MODEL_LABEL}). It downloads from this app’s own site on first use.`; };
+  void refreshModel();
+  const dlBtn = h('button', { class: 'ghost' }, icon('download'), 'Download for offline');
+  dlBtn.addEventListener('click', () => busy(dlBtn, 'Downloading…', async () => {
+    const ms = await prepareModel((f) => { dlBtn.textContent = `Downloading… ${Math.round(f * 100)}%`; });
+    toast(`Voice model ready (${(ms / 1000).toFixed(1)} s)`); await refreshModel();
+  }));
+  const rmBtn = h('button', { class: 'ghost' }, 'Remove voice model');
+  rmBtn.addEventListener('click', () => busy(rmBtn, 'Removing…', async () => { await removeModel(); await refreshModel(); }));
+  const dictList = h('div', { class: 'dict' });
+  let dict = s.dictionary.map((r) => ({ ...r }));
+  const saveDict = async () => { await vault.updateSettings({ dictionary: dict.filter((r) => r.from.trim()) }); };
+  const drawDict = () => {
+    dictList.replaceChildren(...dict.map((r, i) => {
+      const a = h('input', { value: r.from, placeholder: 'When I say…', 'aria-label': 'Heard' });
+      const b = h('input', { value: r.to, placeholder: 'Write…', 'aria-label': 'Replacement' });
+      a.addEventListener('change', () => { r.from = a.value; void saveDict(); });
+      b.addEventListener('change', () => { r.to = b.value; void saveDict(); });
+      return h('div', { class: 'dict-row' }, a, h('span', { class: 'muted' }, '→'), b,
+        h('button', { class: 'icon-btn sm', 'aria-label': 'Remove rule', onclick: () => { dict.splice(i, 1); void saveDict(); drawDict(); } }, icon('close')));
+    }));
+  };
+  drawDict();
+  const addRule = h('button', { class: 'ghost', onclick: () => { dict.push({ from: '', to: '' }); drawDict(); (dictList.lastElementChild?.querySelector('input') as HTMLInputElement | null)?.focus(); } }, icon('plus'), 'Add replacement');
+
   const sec = (title: string, ...kids: (Node | null)[]) => h('section', { class: 'set' }, h('h4', {}, title), ...kids);
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Settings' },
     h('div', { class: 'sheet-top' }, h('button', { class: 'icon-btn', 'aria-label': 'Back', onclick: close }, icon('back')), h('span', {}, 'Settings')),
@@ -119,6 +149,15 @@ export function openSettings(ctx: StudioCtx, rerender: () => void) {
       sec('Secret gesture',
         h('p', { class: 'muted small' }, 'Pick an artwork, then tap squares of its 3×3 grid. In the gallery, open that artwork and tap the same squares within 3 seconds of each other.'),
         artSel, pad, seqOut, h('div', { class: 'row' }, gestureSave, h('button', { class: 'ghost', type: 'button', onclick: () => { seq = []; seqOut.textContent = 'Tap 3–9 squares in order'; } }, 'Clear'))),
+      sec('Voice typing',
+        h('p', { class: 'muted small' }, voiceSupported()
+          ? 'Tap Dictate in a note. Speech is transcribed on this device with Whisper. Audio is kept only in memory, never stored, and erased once you insert the text or the app locks.'
+          : 'Voice typing isn’t supported in this browser.'),
+        modelState, h('div', { class: 'row wrap' }, dlBtn, rmBtn),
+        h('label', { class: 'row' }, cmds, 'Spoken commands'),
+        h('p', { class: 'muted small' }, 'Say “new line”, “new paragraph”, “period”, “comma”, “question mark”, “exclamation mark”, “colon”, “semicolon”, “dash”, “open quote”, “close quote”.'),
+        h('p', { class: 'muted small' }, 'Custom dictionary (encrypted): fix names and words Whisper mishears.'),
+        dictList, addRule),
       sec('Passphrase', cur, nx1, nx2, passBtn),
       vault.isPrimary ? sec('Decoy collection',
         h('p', { class: 'muted small' }, 'A second passphrase that opens a separate, harmless collection. Nothing on the device shows how many collections exist.'),

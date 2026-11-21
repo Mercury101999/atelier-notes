@@ -8,6 +8,10 @@ Atelier is an installable, offline-only web app (PWA). It has no server, no acco
 |---|---|---|---|
 | ![](docs/screenshots/01-gallery-mobile.png) | ![](docs/screenshots/04-unlocked-collection.png) | ![](docs/screenshots/05-editor.png) | ![](docs/screenshots/06-board.png) |
 
+| Voice: trim before transcribing | Voice: review before inserting |
+|---|---|
+| ![](docs/screenshots/09-voice-trim.png) | ![](docs/screenshots/09-voice-review.png) |
+
 ## Opening it: the secret gesture
 
 1. Tap the **third** painting, *Nocturne for Salt*, to view it full screen.
@@ -24,6 +28,7 @@ The painting shows no feedback for these taps. To change the gesture, go to **Se
 - **Note-to-note links** with backlinks ("Referenced by").
 - **Board view**: a force-directed graph of notes, their links and their attachments. You can pan, zoom, drag nodes, and tap a note to open it.
 - **Notes shown as abstract art**: each note's artwork is generated from its random record ID, never from its content.
+- **On-device voice typing**: tap **Dictate** in a note to record. Trim the start and end or cut out middle sections on a waveform, then transcribe locally with Whisper. Review and edit the text before inserting it. A custom dictionary and spoken commands are applied automatically (details below).
 - **Auto-lock** after a configurable idle time (3 minutes by default), and whenever the app is hidden or you switch away.
 - **Panic lock**: tap the lock icon or press **Esc twice**.
 - **Decoy passphrase**: opens a separate, ordinary-looking collection (see below).
@@ -55,6 +60,35 @@ The painting shows no feedback for these taps. To change the gesture, go to **Se
 - A backup is a full-device image (header plus every record, all already ciphertext), wrapped in another AES-GCM layer keyed from your passphrase with PBKDF2 (600k iterations) and a fresh salt. That makes the payload look uniformly random.
 - Artwork export writes that payload into the 2 least-significant bits of the R, G and B channels of freshly generated paintings, saved as lossless PNGs. Leftover capacity is filled with random bits. Large backups are split across several images; import accepts them in any order.
 
+## Voice typing (on-device)
+
+**Flow:** Dictate → record (up to 5 min) → trim/cut on the waveform, with optional playback → **Transcribe** → review and edit → **Insert** at the cursor. The note then saves encrypted as usual.
+
+**Model:** [Whisper tiny.en](https://huggingface.co/onnx-community/whisper-tiny.en) with 8-bit quantized ONNX weights (encoder 10 MB + decoder 31 MB). It runs through transformers.js and ONNX Runtime Web (WASM, single-threaded, 14 MB runtime). That's about **56 MB in total**.
+
+**Where the files come from:**
+- The model and runtime are committed to this repo under `public/models/` and `public/ort/` and served from the app's **own origin**. Remote model loading is disabled.
+- The CSP still allows only `'self'` (plus `'wasm-unsafe-eval'` so WebAssembly can compile).
+- The Web Speech API is **not** used, since it sends audio to cloud services.
+
+**Offline:**
+- Model files download on first use, or via **Settings → Voice typing → Download for offline**. The service worker then keeps them in the `atelier-voice-v1` cache, which survives app updates.
+- They aren't precached at install, so opening the gallery stays light.
+- **Remove voice model** in Settings deletes that cache.
+
+**Audio privacy:**
+- The microphone is captured with an AudioWorklet into raw `Float32Array`s held **only in memory**. No MediaRecorder files, IndexedDB, Cache Storage or localStorage are used.
+- The clip sent for transcription is *transferred* to the worker, which zeroes it afterwards.
+- The recording is zeroed when you insert the text, discard the session, or the app locks.
+- Locking (idle, app hidden, Esc Esc, or the lock button) stops the microphone, terminates the transcription worker and erases the audio.
+
+**Dictionary and commands** (Settings → Voice typing, stored encrypted in the vault):
+- Dictionary rules replace whole words or phrases, case-insensitive.
+- Spoken commands: "new line", "new paragraph", "period" / "full stop", "comma", "question mark", "exclamation mark/point", "colon", "semicolon", "dash", "open quote", "close quote".
+- Commands can be turned off, for example if you often say "period" as a word.
+
+**Speed** (headless Chromium on a desktop-class CPU, single-threaded WASM): about 11 s of speech transcribes in about 1.6 s. The first use adds model download and initialisation, a few seconds on a fast connection. Expect roughly 3–10× slower on phones.
+
 ## Limits: please read
 
 - **Forgotten passphrase = data lost forever.** There is no recovery, reset or back door.
@@ -65,6 +99,11 @@ The painting shows no feedback for these taps. To change the gesture, go to **Se
 - **The secret gesture is camouflage, not security.** It is stored as a salted SHA-256 hash, but the passphrase is what protects your data.
 - **Memory**: JavaScript can't securely erase strings. Locking drops all references, but decrypted text can linger in memory until garbage collection. A compromised device, browser extension or keylogger can read what you type.
 - **Attached non-image files** (PDFs and so on) are encrypted but stored as-is, so any metadata inside them is kept. Images are re-encoded (JPEG, or PNG if they have transparency) and capped at 2560 px on the long side.
+- **Voice typing accuracy and support:**
+  - Whisper *tiny.en* is English-only and makes mistakes with names and jargon (use the dictionary). Long or noisy recordings are less accurate.
+  - It needs AudioWorklet and WebAssembly: current Chrome, Edge, Firefox, and Safari 14.5+ on iOS and macOS.
+  - On iOS, installed home-screen apps have had intermittent microphone bugs, and iOS may evict the cached model when storage is low. It then downloads again from this site.
+  - Browsers ask for microphone permission. Switching apps while recording locks Atelier and discards the recording, by design.
 - **Mobile file pickers** briefly hide the app. Auto-lock-on-hide is paused only while a picker is open.
 
 ## Develop
@@ -75,6 +114,7 @@ npm run dev        # local dev server
 npm test           # unit tests: crypto, stego/PNG, vault/decoy/backup (vitest + fake-indexeddb)
 npm run build      # type-check + production build into dist/
 npx playwright install chromium && npm run screenshots   # end-to-end checks + screenshots (against dist/)
+npm run e2e:voice  # voice typing end-to-end with a fake microphone (tests/fixtures/jfk.wav)
 npm run icons      # regenerate app icons from the same art engine
 ```
 
@@ -87,6 +127,9 @@ src/core/store.ts    IndexedDB + in-memory stores
 src/core/art.ts      deterministic generative art (pure RGBA)
 src/core/png.ts      minimal lossless PNG encoder/decoder
 src/core/stego.ts    LSB embedding across one or more PNG artworks
+src/core/dictation.ts  audio trim/cut/resample helpers, dictionary + spoken-command post-processing
+src/voiceWorker.ts   Whisper (transformers.js) worker, same-origin model + runtime
+public/pcm-worklet.js  in-memory microphone capture
 src/ui/*             gallery, viewer + gesture, studio (collections), editor, board, settings, lock guard
 vite.config.ts       strict CSP + generated precaching service worker
 ```
@@ -94,3 +137,8 @@ vite.config.ts       strict CSP + generated precaching service worker
 ## Deploy
 
 `.github/workflows/deploy.yml` runs the tests, builds the app and publishes `dist/` to GitHub Pages. It's a static app, and the data never leaves your device. On a free GitHub plan, Pages requires the repository to be **public**. Private repositories need GitHub Pro. To turn deploys on, set Settings → Pages → Source to *GitHub Actions* and add the repository variable `DEPLOY_PAGES=true`. Until then, the workflow still runs the tests and the build on every push. Any static host works too.
+
+## Third-party components
+
+- Whisper tiny.en weights by OpenAI (MIT), ONNX export by onnx-community/Xenova.
+- [transformers.js](https://github.com/huggingface/transformers.js) (Apache-2.0) and [ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (MIT).

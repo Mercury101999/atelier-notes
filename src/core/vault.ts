@@ -22,7 +22,15 @@ export interface Note {
   created: number;
   updated: number;
 }
-export interface Settings { idleMinutes: number; hideTitles: boolean }
+export interface Settings {
+  idleMinutes: number;
+  hideTitles: boolean;
+  /** Dictation: word/phrase -> replacement rules (encrypted with the vault index). */
+  dictionary: { from: string; to: string }[];
+  /** Dictation: apply spoken commands like "new line", "period". */
+  voiceCommands: boolean;
+}
+export const DEFAULT_SETTINGS: Settings = { idleMinutes: 3, hideTitles: false, dictionary: [], voiceCommands: true };
 interface Index {
   v: 1;
   primary: boolean;
@@ -77,7 +85,7 @@ export async function createVault(store: Store, passphrase: string): Promise<Vau
   const header: Header = { v: 1, salt, iter: PBKDF2_ITERATIONS, slots, gestureSalt: randomBytes(16), gesture: null };
   await store.replaceAll(header, []);
   const keys = await keysFromMaster(master);
-  const index: Index = { v: 1, primary: true, slot, owned: [slot], notes: [], folders: [], settings: { idleMinutes: 3, hideTitles: false } };
+  const index: Index = { v: 1, primary: true, slot, owned: [slot], notes: [], folders: [], settings: structuredClone(DEFAULT_SETTINGS) };
   const v = new Vault(store, keys, index, await hmacHex(keys.ids, 'atelier/index'), new Map());
   await v.saveIndex();
   await writeNoise(store, 4 + Math.floor(Math.random() * 7));
@@ -95,6 +103,7 @@ export async function unlockVault(store: Store, passphrase: string): Promise<Vau
   if (!raw) return null;
   const index = dec<Index>(await openRecord(keys, indexId, raw));
   index.folders ??= [];
+  index.settings = { ...structuredClone(DEFAULT_SETTINGS), ...index.settings };
   const notes = new Map<string, Note>();
   for (const id of index.notes) {
     const r = await store.get(id);
@@ -121,7 +130,7 @@ export class Vault {
   private k(): VaultKeys { if (!this.keys) throw new Error('Locked'); return this.keys; }
   get locked() { return !this.keys; }
   get isPrimary() { return this.index.primary; }
-  get settings(): Settings { return { ...this.index.settings }; }
+  get settings(): Settings { return structuredClone(this.index.settings); }
   get folders(): Folder[] { return this.index.folders.map((f) => ({ ...f })); }
 
   async saveIndex() { await this.store.put(this.indexId, await sealRecord(this.k(), this.indexId, enc(this.index))); }
@@ -217,7 +226,7 @@ export class Vault {
     header.slots[slot] = await seal(kek, master, slotAad(slot));
     await this.store.putHeader(header);
     const keys = await keysFromMaster(master);
-    const index: Index = { v: 1, primary: false, slot, owned: [slot], notes: [], folders: [], settings: { ...this.index.settings } };
+    const index: Index = { v: 1, primary: false, slot, owned: [slot], notes: [], folders: [], settings: { ...structuredClone(this.index.settings), dictionary: [] } };
     const decoy = new Vault(this.store, keys, index, await hmacHex(keys.ids, 'atelier/index'), new Map());
     await decoy.saveIndex();
     if (seed) {
@@ -250,7 +259,7 @@ export class Vault {
   lock() {
     this.keys = null;
     this.noteMap.clear();
-    this.index = { v: 1, primary: false, slot: -1, owned: [], notes: [], folders: [], settings: { idleMinutes: 3, hideTitles: false } };
+    this.index = { v: 1, primary: false, slot: -1, owned: [], notes: [], folders: [], settings: structuredClone(DEFAULT_SETTINGS) };
   }
 }
 
