@@ -27,9 +27,13 @@ jobs:
       - run: npm test
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
+        if: ${{ vars.DEPLOY_PAGES == 'true' }}
         with:
           path: dist
+  # Enable by setting the repository variable DEPLOY_PAGES=true once Pages is available
+  # (public repo on a free plan, or GitHub Pro for private repos) with Source = GitHub Actions.
   deploy:
+    if: ${{ vars.DEPLOY_PAGES == 'true' }}
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -93,4 +93,4 @@ vite.config.ts       strict CSP + generated precaching service worker
 
 ## Deploy
 
-`.github/workflows/deploy.yml` runs the tests, builds the app and publishes `dist/` to GitHub Pages. It's a static app, and the data never leaves your device. On a free GitHub plan, Pages requires the repository to be **public**. Private repositories need GitHub Pro. Any static host works too.
+`.github/workflows/deploy.yml` runs the tests, builds the app and publishes `dist/` to GitHub Pages. It's a static app, and the data never leaves your device. On a free GitHub plan, Pages requires the repository to be **public**. Private repositories need GitHub Pro. To turn deploys on, set Settings → Pages → Source to *GitHub Actions* and add the repository variable `DEPLOY_PAGES=true`. Until then, the workflow still runs the tests and the build on every push. Any static host works too.
